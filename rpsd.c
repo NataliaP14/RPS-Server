@@ -37,7 +37,7 @@ int parse_continue(char *cont);
 int parse_quit(char *quit);
 void play_logic(Player *player, const char *name);
 void move_logic(Player *player, const char *move);
-void continue_logic(Player *player, int rematch);
+void continue_logic(Player *player);
 void quit_logic(Player *player);
 int receiver(int socket, char *buffer, size_t length);
 int sender(int socket, const char *message);
@@ -181,8 +181,8 @@ void move_logic(Player *player, const char *move){
     
 }
 
-void continue_logic(Player *player, int rematch){
-    player->rematch=rematch;
+void continue_logic(Player *player){
+    player->rematch=1;
 }
 
 void quit_logic(Player *player){
