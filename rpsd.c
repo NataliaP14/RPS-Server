@@ -38,7 +38,6 @@ int parse_quit(char *quit);
 void play_logic(Player *player, const char *name);
 void move_logic(Player *player, const char *move);
 void continue_logic(Player *player, int rematch);
-void continue_logic(Player *player);
 void quit_logic(Player *player);
 int receiver(int socket, char *buffer, size_t length);
 int sender(int socket, const char *message);
@@ -56,26 +55,6 @@ void add_active_player(const char *name);
 void remove_active_player(const char *name);
 int main(int argc, char **argv);
 
-
-void play_logic(Player *player, const char *name){
-    player->fd = 0;
-    strcpy(player->name, name);
-    //add active player
-    //wait();
-}
-
-void move_logic(Player *player, const char *move){
-    strcpy(player->move,move);
-    
-}
-
-void continue_logic(Player *player, int rematch){
-    player->rematch=rematch;
-}
-
-void quit_logic(Player *player){
-    player->rematch=0;
-}
 
 MessageType get_message_type(char *buffer) {
     if (strcmp(buffer, "C") == 0) {
@@ -188,6 +167,26 @@ int sender(int socket, const char *message) {
     }
 
     return 0;
+}
+
+void play_logic(Player *player, const char *name){
+    player->fd = 0;
+    strcpy(player->name, name);
+    //add active player
+    //wait();
+}
+
+void move_logic(Player *player, const char *move){
+    strcpy(player->move,move);
+    
+}
+
+void continue_logic(Player *player, int rematch){
+    player->rematch=rematch;
+}
+
+void quit_logic(Player *player){
+    player->rematch=0;
 }
 
 
