@@ -56,25 +56,6 @@ void remove_active_player(const char *name);
 int main(int argc, char **argv);
 
 
-void play_logic(Player *player, const char *name){
-    strcpy(player->name, name);
-    //add active player
-    //wait();
-}
-
-void move_logic(Player *player, const char *move){
-    strcpy(player->move,move);
-    
-}
-
-void continue_logic(Player *player){
-    player->rematch=1;
-}
-
-void quit_logic(Player *player){
-    player->rematch=0;
-}
-
 MessageType get_message_type(char *buffer) {
     if (strcmp(buffer, "C") == 0) {
         return CONTINUE;
@@ -186,6 +167,26 @@ int sender(int socket, const char *message) {
     }
 
     return 0;
+}
+
+void play_logic(Player *player, const char *name){
+    player->fd = 0;
+    strcpy(player->name, name);
+    //add active player
+    //wait();
+}
+
+void move_logic(Player *player, const char *move){
+    strcpy(player->move,move);
+    
+}
+
+void continue_logic(Player *player){
+    player->rematch=1;
+}
+
+void quit_logic(Player *player){
+    player->rematch=0;
 }
 
 
