@@ -34,10 +34,22 @@ int parse_play();
 int parse_move();
 int parse_continue();
 int parse_quit();
-void play_logic(Player *player, const char *name);
-void move_logic(Player *player, const char *name);
-void continue_logic(Player *player);
-void quit_logic(Player *player);
+void play_logic(Player *player, const char *name){
+    player->fd = 0;
+    strcpy(player->name, name);
+    //add active player
+    //wait();
+};
+void move_logic(Player *player, const char *move){
+    strcpy(player->move,move);
+    
+};
+void continue_logic(Player *player, int rematch){
+    player->rematch=rematch;
+};
+void quit_logic(Player *player){
+    player->rematch=0;
+};
 int receiver(int socket, char *buffer, size_t len);
 int sender(int sock, const char *message);
 void wait(int socket);
@@ -48,7 +60,9 @@ Player *accept_player(int listener);
 Player *register_player(int listner);
 void match_players(Player *player1, Player *player2);
 void game(void *arg);
-char winner(const char *move1, const char *move2);
+char winner(const char *move1, const char *move2){
+    
+};
 int active_player(const char *name);
 void add_active_player(const char *name);
 void remove_active_player(const char *name);
