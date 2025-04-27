@@ -170,9 +170,8 @@ int sender(int socket, const char *message) {
 }
 
 void play_logic(Player *player, const char *name){
-    player->fd = 0;
     strcpy(player->name, name);
-    //add active player
+    //add active player, call add_active_player
     //wait();
 }
 
@@ -187,6 +186,55 @@ void continue_logic(Player *player){
 
 void quit_logic(Player *player){
     player->rematch=0;
+}
+
+int server() {
+
+}
+
+Player *accept_player(int listener) {
+
+}
+
+Player *register_player(int listner) {
+
+}
+
+void match_players(Player *player1, Player *player2) {
+    Game *new_game = malloc(sizeof(Game));
+    if (!new_game) {
+        perror("allocation error");
+        return;
+    }
+    new_game->player1 = player1;
+    new_game->player2 = player2;
+
+    game((void *)new_game);
+}
+
+void game(void *arg) {
+
+}
+
+char winner(const char *move1, const char *move2) {
+
+}
+
+int active_player(const char *name) {
+
+}
+
+void add_active_player(const char *name) {
+
+}
+
+void remove_active_player(const char *name) {
+
+}
+
+int main(int argc, char **argv) {
+
+    return EXIT_SUCCESS;
 }
 
 
