@@ -8,6 +8,7 @@
 #include <netdb.h>       
 #include <pthread.h> 
 #include <ctype.h>
+#include "network.h"
     
 typedef struct {
     int fd;
@@ -47,7 +48,7 @@ int sender(int socket, const char *message);
 void wait(int socket);
 void begin(int socket);
 void result(int socket, char result, const char *move);
-int server();
+int server(int port);
 Player *register_player(int listner);
 void match_players(Player *player1, Player *player2);
 void game(void *arg);
@@ -189,7 +190,31 @@ void result(int socket, char result, const char *move) {
     
 }
 
-int server() {
+int server(int port) {
+    char port_ch[16];
+    sprintf(port_ch, "%d", port);
+    int listener = open_listener(port_ch, 50);
+    if (listener < 0) { perror("listener error"); exit(EXIT_FAILURE);}
+
+    printf("Server started on port %d\n", port);
+
+    while (1) {
+        Player *player1 = register_player(listener);
+        if (!player1) {
+            continue;
+        }
+        Player *player2 = register_player(listener);
+        if (!player2) {
+            free(player1);
+            continue;
+        }
+
+        match_players(player1, player2);
+    }
+
+    close(listener);
+    return EXIT_SUCCESS;
+
 
 }
 
@@ -233,6 +258,8 @@ Player *register_player(int listener) {
     play_logic(player, name);
     add_active_player(name);
 
+    printf("Player registered: %s\n", name);
+
     return player;
 
 }
@@ -257,6 +284,9 @@ void match_players(Player *player1, Player *player2) {
         free(new_game);
         exit(EXIT_SUCCESS);
     }
+
+    printf("Match started: %s vs %s\n", player1->name, player2->name);
+
 
 }
 
@@ -284,13 +314,18 @@ void game(void *arg) {
         if (player2_move == 0 && parse_move(buffer2, move_p2) == 0) {
             move_logic(player2, move_p2);
         }
+        printf("%s played: %s\n", player1->name, move_p1);
+        printf("%s played: %s\n", player2->name, move_p2);
 
         //p1 forfeit
         if (move_p1[0] == '\0') {
             result(player2->fd, 'F', "");
+            printf("%s forfeited\n", player1->name); 
+
         //p2 forfeit
         } else if (move_p2[0] == '\0') {
             result(player1->fd, 'F', "");
+            printf("[!] %s forfeited\n", player2->name); 
         } else if (move_p1[0] == '\0' && move_p2[0] == '\0') {
             break;
         } else {
@@ -299,6 +334,10 @@ void game(void *arg) {
             char calc_winner_p2 = winner(move_p2, move_p1);
             result(player1->fd, calc_winner_p1, move_p2);
             result(player2->fd, calc_winner_p2, move_p1);
+
+            printf("%s %s against %s\n", player1->name, (calc_winner_p1 == 'W') ? "won" : (calc_winner_p1 == 'L') ? "lost" : "drew", player2->name);
+            printf("%s %s against %s\n", player2->name, (calc_winner_p2 == 'W') ? "won" : (calc_winner_p2 == 'L') ? "lost" : "drew", player1->name);
+
         }
 
         //get user input for both players (continue or quit)
@@ -316,15 +355,19 @@ void game(void *arg) {
         }
 
         if (type_p1 == CONTINUE) {
+            printf("[⟳] %s wants a rematch\n", player1->name);
             continue_logic(player1);
         } else if (type_p1 == QUIT) {
             quit_logic(player1);
+            printf("%s quit the game\n", player1->name);
         }
 
         if (type_p2 == CONTINUE) {
             continue_logic(player2);
+            printf(" %s wants a rematch\n", player2->name);
         } else if (type_p2 == QUIT) {
             quit_logic(player2);
+            printf("%s quit the game\n", player2->name);
         }
 
         //players continue
@@ -334,13 +377,16 @@ void game(void *arg) {
             continue;
         //players quit
         } else if (!player1->rematch && !player2->rematch) {
+            remove_active_player(player1->name); remove_active_player(player2->name);
             break;
         //player1 quits and player2 continues    
         } else if (!player1->rematch && player2->rematch) {
+            remove_active_player(player1->name);
             wait(player2->fd);
             break;
         //player1 continues and player2 quits    
         } else if (player1->rematch && !player2->rematch) {
+            remove_active_player(player2->name);
             wait(player1->fd);
             break;
         }
@@ -359,10 +405,6 @@ char winner(const char *move1, const char *move2) {
 
 }
 
-int active_player(const char *name) {
-
-}
-
 void add_active_player(const char *name) {
 
 }
@@ -372,8 +414,13 @@ void remove_active_player(const char *name) {
 }
 
 int main(int argc, char **argv) {
+    if (argc != 2) {
+        fprintf(stderr, "Error: %s <port>\n", argv[0]);
+        exit(EXIT_FAILURE);
+    }
+    int port = atoi(argv[1]);
 
-    return EXIT_SUCCESS;
+    return server(port);
 }
 
 

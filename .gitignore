@@ -1,0 +1,5 @@
+*.o
+rpsd
+rc 
+*.log
+*.out
