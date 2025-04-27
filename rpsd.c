@@ -29,6 +29,9 @@ typedef enum {
     INVALID = -1
 } MessageType;
 
+char **active_players = NULL;
+int player_count = 0;
+
 
 MessageType get_messsage_type(char *buffer);
 int parse_play(char *buffer, char *name);
@@ -45,7 +48,6 @@ void wait(int socket);
 void begin(int socket);
 void result(int socket, char result, const char *move);
 int server();
-Player *accept_player(int listener);
 Player *register_player(int listner);
 void match_players(Player *player1, Player *player2);
 void game(void *arg);
@@ -127,21 +129,6 @@ int parse_move(char *buffer, char *move) {
     return 0;
 }
 
-int parse_continue(char *cont) {
-    if (strcmp(cont, "C") != 0) {
-        return -1;
-    }
-
-    return 0;
-}
-
-int parse_quit(char *quit) {
-    if (strcmp(quit, "Q") != 0) {
-        return -1;
-    }
-    return 0;
-}
-
 int receiver(int socket, char *buffer, size_t length) {
     ssize_t n = read(socket, buffer, length - 1);
     if (n < 0) {
@@ -186,17 +173,67 @@ void continue_logic(Player *player){
 
 void quit_logic(Player *player){
     player->rematch=0;
+    close(player->fd);
+    remove_active_player(player->name);
+}
+
+void wait(int socket) {
+
+}
+
+void begin(int socket) {
+
+}
+
+void result(int socket, char result, const char *move) {
+    
 }
 
 int server() {
 
 }
 
-Player *accept_player(int listener) {
+Player *register_player(int listener) {
+    int fd = accept(listener, NULL, NULL);
+    if (fd < 0) {
+        perror("accept failed");
+        return NULL;
+    }
 
-}
+    char buffer[256];
+    if (receiver(fd, buffer, sizeof(buffer)) != 0) {
+        close(fd);
+        return NULL;
+    }
 
-Player *register_player(int listner) {
+    char name[256];
+    if (parse_play(buffer, name) != 0) {
+        close(fd);
+        return NULL;
+    }
+
+    //check for duplicate name
+    for (int i = 0; i < player_count; i++) {
+        if (strcmp(active_players[i], name) == 0) {
+            sender(fd, "R|L|Logged in||");
+            close(fd);
+            return NULL;
+        }
+    }
+
+    Player *player = malloc(sizeof(Player));
+    if (!player) {
+        perror("malloc failed");
+        close(fd);
+        return NULL;
+    }
+
+    player->fd = fd; player->move[0] = '\0'; player->rematch = 0;
+
+    play_logic(player, name);
+    add_active_player(name);
+
+    return player;
 
 }
 
@@ -209,10 +246,112 @@ void match_players(Player *player1, Player *player2) {
     new_game->player1 = player1;
     new_game->player2 = player2;
 
-    game((void *)new_game);
+    pid_t pid = fork();
+
+    if (pid < 0) {
+        perror("fork failed");
+        exit(EXIT_FAILURE);
+    } else if (pid == 0) {
+        //game is running inside of child process
+        game((void *)new_game);
+        free(new_game);
+        exit(EXIT_SUCCESS);
+    }
+
 }
 
 void game(void *arg) {
+    Game *game = (Game *)arg;
+    Player *player1 = game->player1;
+    Player *player2 = game->player2;
+    char buffer1[256];
+    char buffer2[256];
+
+    begin(player1->fd);
+    begin(player2->fd);
+
+    while (1) {
+        //get user input for both players (their moves)
+        int player1_move = receiver(player1->fd, buffer1, sizeof(buffer1));
+        int player2_move = receiver(player2->fd, buffer2, sizeof(buffer2));
+        char move_p1[16] = "";
+        char move_p2[16] = "";
+
+        if (player1_move == 0 && parse_move(buffer1, move_p1) == 0) {
+            move_logic(player1, move_p1);
+        }
+
+        if (player2_move == 0 && parse_move(buffer2, move_p2) == 0) {
+            move_logic(player2, move_p2);
+        }
+
+        //p1 forfeit
+        if (move_p1[0] == '\0') {
+            result(player2->fd, 'F', "");
+        //p2 forfeit
+        } else if (move_p2[0] == '\0') {
+            result(player1->fd, 'F', "");
+        } else if (move_p1[0] == '\0' && move_p2[0] == '\0') {
+            break;
+        } else {
+            //determine winner
+            char calc_winner_p1 = winner(move_p1, move_p2);
+            char calc_winner_p2 = winner(move_p2, move_p1);
+            result(player1->fd, calc_winner_p1, move_p2);
+            result(player2->fd, calc_winner_p2, move_p1);
+        }
+
+        //get user input for both players (continue or quit)
+        int player1_input = receiver(player1->fd, buffer1, sizeof(buffer1));
+        int player2_input = receiver(player2->fd, buffer2, sizeof(buffer2));
+
+        MessageType type_p1 = INVALID;
+        MessageType type_p2 = INVALID;
+
+        if (player1_input == 0) {
+            type_p1 = get_message_type(buffer1);
+        }
+        if (player2_input == 0) {
+            type_p2 = get_message_type(buffer2);
+        }
+
+        if (type_p1 == CONTINUE) {
+            continue_logic(player1);
+        } else if (type_p1 == QUIT) {
+            quit_logic(player1);
+        }
+
+        if (type_p2 == CONTINUE) {
+            continue_logic(player2);
+        } else if (type_p2 == QUIT) {
+            quit_logic(player2);
+        }
+
+        //players continue
+        if (player1->rematch && player2->rematch) {
+            begin(player1->fd);
+            begin(player2->fd);
+            continue;
+        //players quit
+        } else if (!player1->rematch && !player2->rematch) {
+            break;
+        //player1 quits and player2 continues    
+        } else if (!player1->rematch && player2->rematch) {
+            wait(player2->fd);
+            break;
+        //player1 continues and player2 quits    
+        } else if (player1->rematch && !player2->rematch) {
+            wait(player1->fd);
+            break;
+        }
+
+
+    }
+
+   
+    free(player1);
+    free(player2);
+    free(game);
 
 }
 
