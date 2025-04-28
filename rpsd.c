@@ -17,6 +17,8 @@ typedef struct {
     int rematch;
 } Player;
 
+Player *waiting = NULL;
+
 typedef struct {
     Player *player1;
     Player *player2;
@@ -45,7 +47,7 @@ void continue_logic(Player *player);
 void quit_logic(Player *player);
 int receiver(int socket, char *buffer, size_t length);
 int sender(int socket, const char *message);
-void wait(int socket);
+void wait_socket(int socket);
 void begin(int socket);
 void result(int socket, char result, const char *move);
 int server(int port);
@@ -80,22 +82,32 @@ MessageType get_message_type(char *buffer) {
 int parse_play(char *buffer, char *name) {
     char temp_buffer[256];
     strncpy(temp_buffer, buffer, sizeof(temp_buffer));
-    temp_buffer[256] = '\0';
+    temp_buffer[255] = '\0';
 
-    char *type = strtok(temp_buffer, "|");
-    char *input = strtok(NULL, "|");
-    char *end = strtok(NULL, "|");
-
-    if (!type || strcmp(type, "P") != 0) {
-        return -1;
+    size_t len = strlen(temp_buffer);
+    if (len > 0 && temp_buffer[len - 1] == '\n') {
+        temp_buffer[len - 1] = '\0';
     }
 
-    if (!input || !end) {
+    if (strncmp(temp_buffer, "P|", 2) != 0) {
         return -1;
     }
-
-    strncpy(name, input, 255);
-    name[255] = '\0';
+    
+    if (len < 4 || strcmp(&temp_buffer[len-2], "||") != 0) {
+        return -1;
+    }
+    
+    
+    char *name_start = temp_buffer + 2;  
+    int name_len = len - 4; 
+    
+    if (name_len <= 0) {
+        return -1;
+    }
+    
+    strncpy(name, name_start, name_len);
+    name[name_len] = '\0';
+    
     return 0;
     
 }
@@ -103,32 +115,44 @@ int parse_play(char *buffer, char *name) {
 int parse_move(char *buffer, char *move) {
     char temp_buffer[256];
     strncpy(temp_buffer, buffer, sizeof(temp_buffer));
-    temp_buffer[256] = '\0';
+    temp_buffer[255] = '\0';
 
-    char *type = strtok(temp_buffer, "|");
+    size_t len = strlen(temp_buffer);
+    if (len > 0 && temp_buffer[len - 1] == '\n') {
+        temp_buffer[len - 1] = '\0';
+    }
+
+    if (strncmp(temp_buffer, "M|", 2) != 0) {
+        return -1; 
+    }
+
+    strtok(temp_buffer, "|"); 
     char *input = strtok(NULL, "|");
     char *end = strtok(NULL, "|");
+    char *extra = strtok(NULL, "|");
 
-    if (!type || strcmp(type, "M") != 0) {
+    if (!input || extra != NULL) {
+        return -1; 
+    }
+
+    char temp_move[16];
+    strncpy(temp_move, input, sizeof(temp_move) - 1);
+    temp_move[sizeof(temp_move) - 1] = '\0';
+
+    for (int i = 0; temp_move[i]; i++) {
+        temp_move[i] = toupper((unsigned char)temp_move[i]);
+    }
+
+    if (strcmp(temp_move, "ROCK") != 0 &&
+        strcmp(temp_move, "PAPER") != 0 &&
+        strcmp(temp_move, "SCISSORS") != 0) {
         return -1;
     }
 
-    if (!input || !end) {
-        return -1;
-    }
-
-    int i;
-    for (i = 0; input[i] && i < 15; i++) {
-        move[i] = toupper((unsigned char)input[i]);
-    }
-    move[i] = '\0';
-
-    if (strcmp(move, "ROCK") != 0 && strcmp(move, "PAPER")!= 0 && strcmp(move, "SCISSORS") != 0) {
-        return -1;
-    }
-    
+    strcpy(move, temp_move);
     return 0;
 }
+
 
 int receiver(int socket, char *buffer, size_t length) {
     ssize_t n = read(socket, buffer, length - 1);
@@ -158,9 +182,9 @@ int sender(int socket, const char *message) {
 }
 
 void play_logic(Player *player, const char *name){
-    strcpy(player->name, name);
     //add active player, call add_active_player
-    //wait();
+    //call wait
+    wait_socket(player->fd);
 }
 
 void move_logic(Player *player, const char *move){
@@ -173,17 +197,22 @@ void continue_logic(Player *player){
 }
 
 void quit_logic(Player *player){
-    player->rematch=0;
-    close(player->fd);
-    remove_active_player(player->name);
+
+    player->rematch = 0;
+    if (player->fd >= 0) {
+        close(player->fd);
+        player->fd = -1;  
+    } 
+    //call remvoe active player
+    
 }
 
-void wait(int socket) {
-
+void wait_socket(int socket) {
+  //call sender
 }
 
 void begin(int socket) {
-
+    //call sender
 }
 
 void result(int socket, char result, const char *move) {
@@ -199,17 +228,19 @@ int server(int port) {
     printf("Server started on port %d\n", port);
 
     while (1) {
-        Player *player1 = register_player(listener);
-        if (!player1) {
-            continue;
-        }
-        Player *player2 = register_player(listener);
-        if (!player2) {
-            free(player1);
+        Player *player = register_player(listener);
+        if (!player) {
             continue;
         }
 
-        match_players(player1, player2);
+        if (waiting == NULL) {
+            waiting = player;
+            //printf("%s is waiting for an opponent.", player->name);
+        } else {
+            match_players(waiting, player);
+            waiting = NULL;
+        }
+        
     }
 
     close(listener);
@@ -219,46 +250,49 @@ int server(int port) {
 }
 
 Player *register_player(int listener) {
-    int fd = accept(listener, NULL, NULL);
-    if (fd < 0) {
+    Player *player = malloc(sizeof(Player));
+    player->fd = accept(listener, NULL, NULL);
+    if (player->fd < 0) {
         perror("accept failed");
         return NULL;
     }
 
     char buffer[256];
-    if (receiver(fd, buffer, sizeof(buffer)) != 0) {
-        close(fd);
+    if (receiver(player->fd, buffer, sizeof(buffer)) != 0) {
+        close(player->fd);
+        free(player);
         return NULL;
     }
 
-    char name[256];
-    if (parse_play(buffer, name) != 0) {
-        close(fd);
+    if (parse_play(buffer, player->name) != 0) {
+        close(player->fd);
+        free(player);
         return NULL;
     }
 
     //check for duplicate name
     for (int i = 0; i < player_count; i++) {
-        if (strcmp(active_players[i], name) == 0) {
-            sender(fd, "R|L|Logged in||");
-            close(fd);
+        if (strcmp(active_players[i], player->name) == 0) {
+            sender(player->fd, "R|L|Logged in||");
+            close(player->fd);
+            free(player);
             return NULL;
         }
     }
 
-    Player *player = malloc(sizeof(Player));
     if (!player) {
         perror("malloc failed");
-        close(fd);
+        close(player->fd);
+        free(player);
         return NULL;
     }
 
-    player->fd = fd; player->move[0] = '\0'; player->rematch = 0;
+    player->move[0] = '\0'; player->rematch = 0;
 
-    play_logic(player, name);
-    add_active_player(name);
+    play_logic(player, player->name);
+    add_active_player(player->name);
 
-    printf("Player registered: %s\n", name);
+    printf("Player registered: %s\n", player->name);
 
     return player;
 
@@ -277,16 +311,22 @@ void match_players(Player *player1, Player *player2) {
 
     if (pid < 0) {
         perror("fork failed");
+        free(new_game);
         exit(EXIT_FAILURE);
     } else if (pid == 0) {
         //game is running inside of child process
         game((void *)new_game);
-        free(new_game);
+        //free(new_game);
         exit(EXIT_SUCCESS);
+    } else {
+        printf("Match started: %s vs %s\n", player1->name, player2->name);
+        close(player1->fd);
+        close(player2->fd);
+        free(player1);
+        free(player2);
+        free(new_game);
+        
     }
-
-    printf("Match started: %s vs %s\n", player1->name, player2->name);
-
 
 }
 
@@ -306,102 +346,105 @@ void game(void *arg) {
         int player2_move = receiver(player2->fd, buffer2, sizeof(buffer2));
         char move_p1[16] = "";
         char move_p2[16] = "";
+        //printf("Received from player1: %s\n", buffer1);
 
         if (player1_move == 0 && parse_move(buffer1, move_p1) == 0) {
             move_logic(player1, move_p1);
+        } else {
+            quit_logic(player1);
+            result(player2->fd, 'F', ""); 
+            printf("%s forfeited\n", player1->name);
+            if (player1 != NULL) free(player1);
+            if (player2 != NULL) free(player2);
+            player1 = NULL;
+            player2 = NULL;
+            break;
         }
 
         if (player2_move == 0 && parse_move(buffer2, move_p2) == 0) {
             move_logic(player2, move_p2);
+        } else {
+            quit_logic(player2);
+            result(player1->fd, 'F', ""); 
+            printf("%s forfeited\n", player2->name);
+            if (player1 != NULL) free(player1);
+            if (player2 != NULL) free(player2);
+            player1 = NULL;
+            player2 = NULL;
+            break;
         }
+
         printf("%s played: %s\n", player1->name, move_p1);
         printf("%s played: %s\n", player2->name, move_p2);
 
-        //p1 forfeit
-        if (move_p1[0] == '\0') {
-            result(player2->fd, 'F', "");
-            printf("%s forfeited\n", player1->name); 
+        //determine winner
+        char calc_winner_p1 = winner(move_p1, move_p2);
+        char calc_winner_p2 = winner(move_p2, move_p1);
 
-        //p2 forfeit
-        } else if (move_p2[0] == '\0') {
-            result(player1->fd, 'F', "");
-            printf("[!] %s forfeited\n", player2->name); 
-        } else if (move_p1[0] == '\0' && move_p2[0] == '\0') {
-            break;
-        } else {
-            //determine winner
-            char calc_winner_p1 = winner(move_p1, move_p2);
-            char calc_winner_p2 = winner(move_p2, move_p1);
-            result(player1->fd, calc_winner_p1, move_p2);
-            result(player2->fd, calc_winner_p2, move_p1);
+        result(player1->fd, calc_winner_p1, move_p2);
+        result(player2->fd, calc_winner_p2, move_p1);
 
-            printf("%s %s against %s\n", player1->name, (calc_winner_p1 == 'W') ? "won" : (calc_winner_p1 == 'L') ? "lost" : "drew", player2->name);
-            printf("%s %s against %s\n", player2->name, (calc_winner_p2 == 'W') ? "won" : (calc_winner_p2 == 'L') ? "lost" : "drew", player1->name);
+        printf("%s %s against %s\n", player1->name, (calc_winner_p1 == 'W') ? "won" : (calc_winner_p1 == 'L') ? "lost" : "drew", player2->name);
+        printf("%s %s against %s\n", player2->name, (calc_winner_p2 == 'W') ? "won" : (calc_winner_p2 == 'L') ? "lost" : "drew", player1->name);
 
-        }
 
         //get user input for both players (continue or quit)
         int player1_input = receiver(player1->fd, buffer1, sizeof(buffer1));
         int player2_input = receiver(player2->fd, buffer2, sizeof(buffer2));
 
-        MessageType type_p1 = INVALID;
-        MessageType type_p2 = INVALID;
-
-        if (player1_input == 0) {
-            type_p1 = get_message_type(buffer1);
-        }
-        if (player2_input == 0) {
-            type_p2 = get_message_type(buffer2);
-        }
+        MessageType type_p1 = (player1_input == 0) ? get_message_type(buffer1) : INVALID;
+        MessageType type_p2 = (player2_input == 0) ? get_message_type(buffer2) : INVALID;
 
         if (type_p1 == CONTINUE) {
-            printf("[⟳] %s wants a rematch\n", player1->name);
             continue_logic(player1);
-        } else if (type_p1 == QUIT) {
+            printf("%s wants a rematch\n", player1->name);
+        } else {
             quit_logic(player1);
             printf("%s quit the game\n", player1->name);
         }
 
         if (type_p2 == CONTINUE) {
             continue_logic(player2);
-            printf(" %s wants a rematch\n", player2->name);
-        } else if (type_p2 == QUIT) {
+            printf("%s wants a rematch\n", player2->name);
+        } else {
             quit_logic(player2);
             printf("%s quit the game\n", player2->name);
         }
 
+        //players quit
+        if ((!player1->rematch && !player2->rematch) || (player1->rematch && !player2->rematch) || (!player1->rematch && player2->rematch)) {
+            break;
+        }
+       
         //players continue
         if (player1->rematch && player2->rematch) {
             begin(player1->fd);
             begin(player2->fd);
             continue;
-        //players quit
-        } else if (!player1->rematch && !player2->rematch) {
-            remove_active_player(player1->name); remove_active_player(player2->name);
-            break;
-        //player1 quits and player2 continues    
-        } else if (!player1->rematch && player2->rematch) {
-            remove_active_player(player1->name);
-            wait(player2->fd);
-            break;
-        //player1 continues and player2 quits    
-        } else if (player1->rematch && !player2->rematch) {
-            remove_active_player(player2->name);
-            wait(player1->fd);
-            break;
         }
-
-
     }
 
-   
-    free(player1);
-    free(player2);
+    if (player1 != NULL && player1->fd >= 0) {
+        close(player1->fd);
+    }
+    if (player2 != NULL && player2->fd >= 0) {
+        close(player2->fd);
+    }
+    if (player1 != NULL) {
+        free(player1);
+    }
+    if (player2 != NULL) {
+        free(player2);
+    }
     free(game);
+
 
 }
 
+
 char winner(const char *move1, const char *move2) {
+
+    return 0;
 
 }
 
