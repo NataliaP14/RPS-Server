@@ -1,65 +1,10 @@
 #define _POSIX_C_SOURCE 200809L
 
-#include <stdio.h>       
-#include <stdlib.h>     
-#include <string.h>      
-#include <unistd.h>      
-#include <sys/socket.h>  
-#include <netdb.h>       
-#include <pthread.h> 
-#include <ctype.h>
-#include "network.h"
-    
-typedef struct {
-    int fd;
-    char name[256];
-    char move[16];
-    int rematch;
-} Player;
+#include "rpsd.h"
 
 Player *waiting = NULL;
-
-typedef struct {
-    Player *player1;
-    Player *player2;
-} Game;
-
-typedef enum {
-    PLAY,
-    MOVE,
-    CONTINUE,
-    QUIT,
-    INVALID = -1
-} MessageType;
-
 char **active_players = NULL;
 int player_count = 0;
-
-
-MessageType get_messsage_type(char *buffer);
-int parse_play(char *buffer, char *name);
-int parse_move(char *buffer, char *move);
-int parse_continue(char *cont);
-int parse_quit(char *quit);
-void play_logic(Player *player, const char *name);
-void move_logic(Player *player, const char *move);
-void continue_logic(Player *player);
-void quit_logic(Player *player);
-int receiver(int socket, char *buffer, size_t length);
-int sender(int socket, const char *message);
-void wait_socket(int socket);
-void begin(int socket);
-void result(int socket, char result, const char *move);
-int server(int port);
-Player *register_player(int listner);
-void match_players(Player *player1, Player *player2);
-void game(void *arg);
-char winner(const char *move1, const char *move2);
-int active_player(const char *name);
-void add_active_player(const char *name);
-void remove_active_player(const char *name);
-int main(int argc, char **argv);
-
 
 MessageType get_message_type(char *buffer) {
     if (strcmp(buffer, "C") == 0) {
@@ -209,11 +154,13 @@ void quit_logic(Player *player){
 
 void wait_socket(int socket) {
   //call sender
+  
 }
 
-void begin(int socket) {
-    //call sender
+void begin(int socket, const char *opponent_name) {
+    //use snprintf!
 }
+
 
 //TODO: nat
 void result(int socket, char result, const char *move) {
@@ -338,8 +285,8 @@ void game(void *arg) {
     char buffer1[256];
     char buffer2[256];
 
-    begin(player1->fd);
-    begin(player2->fd);
+    begin(player1->fd, player2->name);
+    begin(player2->fd, player1->name);
 
     while (1) {
         //get user input for both players (their moves)
@@ -419,8 +366,8 @@ void game(void *arg) {
        
         //players continue
         if (player1->rematch && player2->rematch) {
-            begin(player1->fd);
-            begin(player2->fd);
+            begin(player1->fd, player2->name);
+            begin(player2->fd, player1->name);
             continue;
         }
     }
@@ -444,10 +391,17 @@ void game(void *arg) {
 
 
 char winner(const char *move1, const char *move2) {
-
-    return 0;
-
+    if (strcmp(move1, move2) == 0) {
+        return 'T';  // Tie
+    }
+    if ((strcmp(move1, "ROCK") == 0 && strcmp(move2, "SCISSORS") == 0) ||
+        (strcmp(move1, "PAPER") == 0 && strcmp(move2, "ROCK") == 0) ||
+        (strcmp(move1, "SCISSORS") == 0 && strcmp(move2, "PAPER") == 0)) {
+        return 'W';  // Win
+    }
+    return 'L';  // Loss
 }
+
 
 //TODO: nat
 void add_active_player(const char *name) {
