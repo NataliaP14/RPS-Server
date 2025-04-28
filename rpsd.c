@@ -215,6 +215,7 @@ void begin(int socket) {
     //call sender
 }
 
+//TODO: nat
 void result(int socket, char result, const char *move) {
     
 }
@@ -448,10 +449,12 @@ char winner(const char *move1, const char *move2) {
 
 }
 
+//TODO: nat
 void add_active_player(const char *name) {
 
 }
 
+//TODO: nat
 void remove_active_player(const char *name) {
 
 }
