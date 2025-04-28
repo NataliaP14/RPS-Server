@@ -52,6 +52,18 @@ int parse_play(char *buffer, char *name) {
     
     strncpy(name, name_start, name_len);
     name[name_len] = '\0';
+
+    int just_space = 1;
+    for (int i = 0; i < name_len; i++) {
+        if (!isspace((unsigned char)name[i])) {
+            just_space = 0;
+            break;
+        }
+    }
+
+    if (just_space) {
+        return -1;
+    }
     
     return 0;
     
@@ -162,10 +174,29 @@ void begin(int socket, const char *opponent_name) {
 }
 
 
-//TODO: nat
 void result(int socket, char result, const char *move) {
-    
+    char result_str[256];
+    snprintf(result_str, sizeof(result_str), "R|%c|%s||", result, move);
+    sender(socket, result_str);
 }
+
+int is_socket_closed(int fd) {
+    char buf;
+    ssize_t n = recv(fd, &buf, 1, MSG_PEEK | MSG_DONTWAIT);
+    if (n == 0) {
+        return 1;
+    }
+    if (n < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            return 0;
+        } else {
+            return 1;
+        }
+    }
+   
+    return 0;
+}
+
 
 int server(int port) {
     char port_ch[16];
@@ -181,12 +212,20 @@ int server(int port) {
             continue;
         }
 
-        if (waiting == NULL) {
+       if (waiting == NULL) {
             waiting = player;
             //printf("%s is waiting for an opponent.", player->name);
+            
         } else {
-            match_players(waiting, player);
-            waiting = NULL;
+            if(is_socket_closed(waiting->fd)) {
+                printf("Waiting player %s disconnected while waiting\n", waiting->name);
+                quit_logic(waiting);
+                free(waiting);
+                waiting = player;
+            } else {
+                match_players(waiting, player);
+                waiting = NULL;
+            }
         }
         
     }
@@ -221,7 +260,7 @@ Player *register_player(int listener) {
     //check for duplicate name
     for (int i = 0; i < player_count; i++) {
         if (strcmp(active_players[i], player->name) == 0) {
-            sender(player->fd, "R|L|Logged in||");
+            result(player->fd, 'L', "Logged in");
             close(player->fd);
             free(player);
             return NULL;
@@ -296,30 +335,46 @@ void game(void *arg) {
         char move_p2[16] = "";
         //printf("Received from player1: %s\n", buffer1);
 
-        if (player1_move == 0 && parse_move(buffer1, move_p1) == 0) {
-            move_logic(player1, move_p1);
-        } else {
+        if (player1_move != 0) {
             quit_logic(player1);
-            result(player2->fd, 'F', ""); 
-            printf("%s forfeited\n", player1->name);
+            result(player2->fd, 'F', "");
+            printf("%s forfeited (disconnected)\n", player1->name);
             if (player1 != NULL) free(player1);
             if (player2 != NULL) free(player2);
             player1 = NULL;
             player2 = NULL;
             break;
+        } else if (parse_move(buffer1, move_p1) != 0) {
+            quit_logic(player1);
+            quit_logic(player2);
+            if (player1 != NULL) free(player1);
+            if (player2 != NULL) free(player2);
+            player1 = NULL;
+            player2 = NULL;
+            break;
+        } else {
+            move_logic(player1, move_p1);
         }
 
-        if (player2_move == 0 && parse_move(buffer2, move_p2) == 0) {
-            move_logic(player2, move_p2);
-        } else {
+        if (player2_move != 0) {
             quit_logic(player2);
-            result(player1->fd, 'F', ""); 
-            printf("%s forfeited\n", player2->name);
+            result(player1->fd, 'F', "");
+            printf("%s forfeited (disconnected)\n", player2->name);
             if (player1 != NULL) free(player1);
             if (player2 != NULL) free(player2);
             player1 = NULL;
             player2 = NULL;
             break;
+        } else if (parse_move(buffer2, move_p2) != 0) {
+            quit_logic(player1);
+            quit_logic(player2);
+            if (player1 != NULL) free(player1);
+            if (player2 != NULL) free(player2);
+            player1 = NULL;
+            player2 = NULL;
+            break;
+        } else {
+            move_logic(player2, move_p2);
         }
 
         printf("%s played: %s\n", player1->name, move_p1);
@@ -391,15 +446,7 @@ void game(void *arg) {
 
 
 char winner(const char *move1, const char *move2) {
-    if (strcmp(move1, move2) == 0) {
-        return 'T';  // Tie
-    }
-    if ((strcmp(move1, "ROCK") == 0 && strcmp(move2, "SCISSORS") == 0) ||
-        (strcmp(move1, "PAPER") == 0 && strcmp(move2, "ROCK") == 0) ||
-        (strcmp(move1, "SCISSORS") == 0 && strcmp(move2, "PAPER") == 0)) {
-        return 'W';  // Win
-    }
-    return 'L';  // Loss
+    return 0;
 }
 
 

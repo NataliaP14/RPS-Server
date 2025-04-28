@@ -9,6 +9,8 @@
 #include <netdb.h>
 #include <pthread.h>
 #include <ctype.h>
+#include <fcntl.h>
+#include <errno.h>
 #include "network.h"
 
 typedef struct {
