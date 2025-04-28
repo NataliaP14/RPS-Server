@@ -11,7 +11,7 @@ rpsd: rpsd.o $(OBJS)
 rc: rc.o $(OBJS)
 	$(CC) $(CFLAGS) -o rc rc.o $(OBJS)
 
-rpsd.o: network.h
+rpsd.o: rpsd.h network.h
 rc.o: network.h
 network.o: network.h
 
