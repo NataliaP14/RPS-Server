@@ -183,6 +183,19 @@ void wait_socket(int socket) {
   
 }
 
+void flush_socket(int fd) {
+    char buf[256];
+    while (1) {
+        struct pollfd pfd = { .fd = fd, .events = POLLIN };
+        int ret = poll(&pfd, 1, 0);
+        if (ret <= 0 || !(pfd.revents & POLLIN)) {
+            break;
+        }
+        read(fd, buf, sizeof(buf));
+    }
+}
+
+
 void begin(int socket, const char *opponent_name) {
     //use snprintf!
     char begin_str[256];
@@ -497,6 +510,10 @@ void *game(void *arg) {
     begin(player1->fd, player2->name);
     begin(player2->fd, player1->name);
 
+    flush_socket(player1->fd);
+    flush_socket(player2->fd);
+
+
     while (1) {
        
         memset(player1->move, 0, sizeof(player1->move));
@@ -601,10 +618,14 @@ void *game(void *arg) {
 
         //player1 rematch, player2 quits
         if (player1->rematch && !player2->rematch) {
+            
             player1->waiting = 1;
             pthread_mutex_lock(&player_lock);
             add_active_player(player1);
             pthread_mutex_unlock(&player_lock);
+
+            add_two_players();
+            //flush_socket(player1->fd);
             
             if (player2->fd >= 0) close(player2->fd);
             free(player2);
@@ -618,6 +639,8 @@ void *game(void *arg) {
             pthread_mutex_lock(&player_lock);
             add_active_player(player2);
             pthread_mutex_unlock(&player_lock);
+
+            add_two_players();
             
             if (player1->fd >= 0) close(player1->fd);
             free(player1);
