@@ -66,6 +66,7 @@ void add_two_players();
 int is_connected(Player *player);
 void clean_disconnected_players();
 void print_active_players();
+void flush_socket(int fd);
 
 
 #endif 
