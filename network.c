@@ -14,7 +14,7 @@ int connect_inet(char *host, char *service)
 
     // look up remote host
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family   = AF_UNSPEC;  // in practice, this means give us IPv4 or IPv6
+    hints.ai_family   = AF_UNSPEC;  
     hints.ai_socktype = SOCK_STREAM; // indicate we want a streaming socket
 
     error = getaddrinfo(host, service, &hints, &info_list);
