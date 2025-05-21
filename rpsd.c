@@ -185,15 +185,22 @@ void wait_socket(int socket) {
 
 void flush_socket(int fd) {
     char buf[256];
-    while (1) {
-        struct pollfd pfd = { .fd = fd, .events = POLLIN };
-        int ret = poll(&pfd, 1, 0);
+    struct pollfd pfd = { .fd = fd, .events = POLLIN };
+
+ 
+    int timeout = 100; 
+    int elapsed = 0;
+
+    while (elapsed < timeout) {
+        int ret = poll(&pfd, 1, 10); 
         if (ret <= 0 || !(pfd.revents & POLLIN)) {
             break;
         }
         read(fd, buf, sizeof(buf));
+        elapsed += 10;
     }
 }
+
 
 
 void begin(int socket, const char *opponent_name) {
@@ -303,12 +310,12 @@ void add_two_players() {
         }
     }
 
-    if (player1 && player2) {
+    if (player1 && player2 && player1 != player2 && strcmp(player1->name, player2->name) != 0) {
         player1->waiting = 0;
         player2->waiting = 0;
 
-        remove_active_player(player1);
-        remove_active_player(player2);
+        //remove_active_player(player1);
+        //remove_active_player(player2);
 
         pthread_mutex_unlock(&player_lock);
         match_players(player1, player2);
@@ -465,32 +472,7 @@ void *game(void *arg) {
     char buffer1[256];
     char buffer2[256];
 
- 
-    player1->rematch = 0;
-    player2->rematch = 0;
-    
-    if (!is_connected(player1)) {
-        //printf("Player %s disconnected before game could start\n", player1->name);
-        
-        if (is_connected(player2)) {
-            player2->waiting = 1;
-            pthread_mutex_lock(&player_lock);
-            add_active_player(player2);
-            pthread_mutex_unlock(&player_lock);
-        } else {
-            if (player2->fd >= 0) close(player2->fd);
-            free(player2);
-        }
-        
-        if (player1->fd >= 0) close(player1->fd);
-        free(player1);
-        free(game);
-        return NULL;
-    }
-    
-    if (!is_connected(player2)) {
-        //printf("Player %s disconnected before game could start\n", player2->name);
-        
+    if (!is_connected(player1) || !is_connected(player2)) {
         if (is_connected(player1)) {
             player1->waiting = 1;
             pthread_mutex_lock(&player_lock);
@@ -500,176 +482,131 @@ void *game(void *arg) {
             if (player1->fd >= 0) close(player1->fd);
             free(player1);
         }
-        
-        if (player2->fd >= 0) close(player2->fd);
-        free(player2);
+
+        if (is_connected(player2)) {
+            player2->waiting = 1;
+            pthread_mutex_lock(&player_lock);
+            add_active_player(player2);
+            pthread_mutex_unlock(&player_lock);
+        } else {
+            if (player2->fd >= 0) close(player2->fd);
+            free(player2);
+        }
+
         free(game);
         return NULL;
     }
 
-    begin(player1->fd, player2->name);
-    begin(player2->fd, player1->name);
-
-    flush_socket(player1->fd);
-    flush_socket(player2->fd);
-
-
     while (1) {
-       
         memset(player1->move, 0, sizeof(player1->move));
         memset(player2->move, 0, sizeof(player2->move));
-        
-        //get player moves
+
+        begin(player1->fd, player2->name);
+        begin(player2->fd, player1->name);
+        flush_socket(player1->fd);
+        flush_socket(player2->fd);
+
         int player1_move = receiver(player1->fd, buffer1, sizeof(buffer1));
         int player2_move = receiver(player2->fd, buffer2, sizeof(buffer2));
-        char move_p1[16] = "";
-        char move_p2[16] = "";
+        char move_p1[16] = "", move_p2[16] = "";
 
-        if (player1_move != 0 || parse_move(buffer1, move_p1) != 0) {
+        int valid_p1 = (player1_move == 0 && parse_move(buffer1, move_p1) == 0);
+        int valid_p2 = (player2_move == 0 && parse_move(buffer2, move_p2) == 0);
+
+        if (!valid_p1 && !valid_p2) {
+            quit_logic(player1);
+            quit_logic(player2);
+            free(player1);
+            free(player2);
+            free(game);
+            return NULL;
+        }
+
+        if (!valid_p1) {
             result(player2->fd, 'F', "");
-            printf("%s forfeited (disconnected)\n", player1->name);
-  
-            if (player1->fd >= 0) {
-                close(player1->fd);
-            }
-            free(player1);
-            player1 = NULL;
-            
-          
-            player2->waiting = 1;
+            quit_logic(player1);
             pthread_mutex_lock(&player_lock);
-            add_active_player(player2);
+            player2->waiting = 1;
             pthread_mutex_unlock(&player_lock);
-            
-            free(game);
+            add_two_players();
             return NULL;
-        } else {
-            move_logic(player1, move_p1);
         }
 
-        if (player2_move != 0 || parse_move(buffer2, move_p2) != 0) {
+        if (!valid_p2) {
             result(player1->fd, 'F', "");
-            printf("%s forfeited (disconnected)\n", player2->name);
-            
-            if (player2->fd >= 0) {
-                close(player2->fd);
+            quit_logic(player2);
+            pthread_mutex_lock(&player_lock);
+            player1->waiting = 1;
+            pthread_mutex_unlock(&player_lock);
+            free(player2);
+            free(game);
+            add_two_players();
+            return NULL;
+        }
+
+        move_logic(player1, move_p1);
+        move_logic(player2, move_p2);
+
+        char result_p1 = winner(move_p1, move_p2);
+        char result_p2 = winner(move_p2, move_p1);
+
+        result(player1->fd, result_p1, move_p2);
+        result(player2->fd, result_p2, move_p1);
+        flush_socket(player1->fd);
+        flush_socket(player2->fd);
+
+        int input1 = receiver(player1->fd, buffer1, sizeof(buffer1));
+        int input2 = receiver(player2->fd, buffer2, sizeof(buffer2));
+
+        MessageType type1 = (input1 == 0) ? get_message_type(buffer1) : INVALID;
+        MessageType type2 = (input2 == 0) ? get_message_type(buffer2) : INVALID;
+
+        int rematch1 = (type1 == CONTINUE);
+        int rematch2 = (type2 == CONTINUE);
+
+        if (!rematch1 && !rematch2) {
+            quit_logic(player1);
+            quit_logic(player2);
+            free(player1);
+            free(player2);
+            free(game);
+            return NULL;
+        }
+
+        if (rematch1 && rematch2) {
+         
+            if (player1 == player2 || strcmp(player1->name, player2->name) == 0) {
+                fprintf(stderr, "Error: player matched with themselves: %s\n", player1->name);
+                quit_logic(player1);
+                
+                free(game);
+                return NULL;
             }
-            free(player2);
-            player2 = NULL;
-            
-            player1->waiting = 1;
-            pthread_mutex_lock(&player_lock);
-            add_active_player(player1);
-            pthread_mutex_unlock(&player_lock);
-            
-            free(game);
-            return NULL;
-        } else {
-            move_logic(player2, move_p2);
-        }
 
-        printf("%s played: %s\n", player1->name, move_p1);
-        printf("%s played: %s\n", player2->name, move_p2);
-
-        char calc_winner_p1 = winner(move_p1, move_p2);
-        char calc_winner_p2 = winner(move_p2, move_p1);
-
-        result(player1->fd, calc_winner_p1, move_p2);
-        result(player2->fd, calc_winner_p2, move_p1);
-
-        printf("%s %s against %s\n", player1->name, (calc_winner_p1 == 'W') ? "won" : (calc_winner_p1 == 'L') ? "lost" : "drew", player2->name);
-        printf("%s %s against %s\n", player2->name, (calc_winner_p2 == 'W') ? "won" : (calc_winner_p2 == 'L') ? "lost" : "drew", player1->name);
-
-        // Get user input for both players (continue or quit)
-        int player1_input = receiver(player1->fd, buffer1, sizeof(buffer1));
-        int player2_input = receiver(player2->fd, buffer2, sizeof(buffer2));
-
-        MessageType type_p1 = (player1_input == 0) ? get_message_type(buffer1) : INVALID;
-        MessageType type_p2 = (player2_input == 0) ? get_message_type(buffer2) : INVALID;
-
-
-        player1->rematch = 0;
-        player2->rematch = 0;
-
-        if (type_p1 == CONTINUE) {
-            player1->rematch = 1;
-            printf("%s wants a rematch\n", player1->name);
-        } else {
-            printf("%s quit the game\n", player1->name);
-        }
-
-        if (type_p2 == CONTINUE) {
-            player2->rematch = 1;
-            printf("%s wants a rematch\n", player2->name);
-        } else {
-            printf("%s quit the game\n", player2->name);
-        }
-
-        //players quit
-        if (!player1->rematch && !player2->rematch) {
-          
-            if (player1->fd >= 0) close(player1->fd);
-            if (player2->fd >= 0) close(player2->fd);
-            free(player1);
-            free(player2);
-            free(game);
-            return NULL;
-        }
-
-        //player1 rematch, player2 quits
-        if (player1->rematch && !player2->rematch) {
-            
-            player1->waiting = 1;
-            pthread_mutex_lock(&player_lock);
-            add_active_player(player1);
-            pthread_mutex_unlock(&player_lock);
-
-            add_two_players();
-            //flush_socket(player1->fd);
-            
-            if (player2->fd >= 0) close(player2->fd);
-            free(player2);
-            free(game);
-            return NULL;
-        }
-
-        //player1 quits, player2 rematches
-        if (!player1->rematch && player2->rematch) {
-            player2->waiting = 1;
-            pthread_mutex_lock(&player_lock);
-            add_active_player(player2);
-            pthread_mutex_unlock(&player_lock);
-
-            add_two_players();
-            
-            if (player1->fd >= 0) close(player1->fd);
-            free(player1);
-            free(game);
-            return NULL;
-        }
-       
-        //players continue
-        if (player1->rematch && player2->rematch) {
-            begin(player1->fd, player2->name);
-            begin(player2->fd, player1->name);
             continue;
         }
+
+        // One wants to rematch, the other quit
+        Player *continuer = rematch1 ? player1 : player2;
+        Player *quitter = rematch1 ? player2 : player1;
+
+        quit_logic(quitter);
+        pthread_mutex_lock(&player_lock);
+        continuer->waiting = 1;
+        pthread_mutex_unlock(&player_lock);
+
+        add_two_players();
+        flush_socket(continuer->fd);
+        flush_socket(quitter->fd);
+        free(quitter);
+        free(game);
+         
+        return NULL;
     }
 
-   
-    if (player1 != NULL) {
-        if (player1->fd >= 0) close(player1->fd);
-        free(player1);
-    }
-
-    if (player2 != NULL) {
-        if (player2->fd >= 0) close(player2->fd);
-        free(player2);
-    }
-
-    free(game);
     return NULL;
 }
+
 
 
 char winner(const char *move1, const char *move2) {
